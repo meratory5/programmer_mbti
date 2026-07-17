@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>プログラマ版性格診断</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { margin: 0; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState } = React;
+
+// ---------- データ定義 ----------
+
+// 4軸: それぞれ2つの文字のどちらかが決まる
+// 1: A(設計から入る) / C(コードから書く)
+// 2: S(ソロ) / T(チーム)
+// 3: L(枯れた技術) / B(最新技術)
+// 4: P(printデバッグ/観察) / D(デバッガ/論理)
+//
+// 各軸4問ずつ、計16問。表面的な道具の好みではなく、
+// 判断の拠り所（何を優先し、何を犠牲にするか）を問う内容に統一。
+// 軸が連続しないよう a→b→c→d の順にラウンドロビンで配置している。
+
+const QUESTIONS = [
+  // --- 1周目 ---
+  {
+    axis: 0,
+    text: "新しい機能を作ることになった。最初の30分で何をする？",
+    a: { letter: "A", label: "構造を描く", sub: "紙かホワイトボードで全体像を固めてから着手したい" },
+    b: { letter: "C", label: "とりあえず書き始める", sub: "手を動かしながら形にしていく方が早い" },
+  },
+  {
+    axis: 1,
+    text: "難しいバグに遭遇した。どうする？",
+    a: { letter: "S", label: "一人で潜る", sub: "誰にも邪魔されず、深く集中したい" },
+    b: { letter: "T", label: "誰かに話す", sub: "喋りながら考えると整理される" },
+  },
+  {
+    axis: 2,
+    text: "新しいフレームワークが話題になっている。",
+    a: { letter: "L", label: "様子見する", sub: "枯れて安定するまで待つ派" },
+    b: { letter: "B", label: "すぐ試す", sub: "とりあえず手元で動かしてみる派" },
+  },
+  {
+    axis: 3,
+    text: "変数の中身がおかしい気がする。",
+    a: { letter: "P", label: "print/console.logを埋める", sub: "実行して目で見て確かめたい" },
+    b: { letter: "D", label: "デバッガでステップ実行", sub: "ブレークポイントを置いて論理的に追う" },
+  },
+
+  // --- 2周目 ---
+  {
+    axis: 0,
+    text: "「動くコードは全てを癒す」にどれくらい同意する？",
+    a: { letter: "A", label: "同意しない", sub: "動く前に、構造が正しいかを確認したい" },
+    b: { letter: "C", label: "強く同意する", sub: "まず動くことが正義、綺麗さは後からでいい" },
+  },
+  {
+    axis: 1,
+    text: "丸一日誰とも話さずコードを書けたら？",
+    a: { letter: "S", label: "最高の一日", sub: "集中できて一番はかどる" },
+    b: { letter: "T", label: "物足りない", sub: "誰かと話したくなってくる" },
+  },
+  {
+    axis: 2,
+    text: "本番環境の技術選定、どっちに惹かれる？",
+    a: { letter: "L", label: "実績のある枯れた技術", sub: "退屈でも壊れないのが正義" },
+    b: { letter: "B", label: "最新技術で刷新したい", sub: "面白そうな方に賭けたい" },
+  },
+  {
+    axis: 3,
+    text: "原因不明のエラーが出た瞬間の第一手は？",
+    a: { letter: "P", label: "怪しい箇所に出力を仕込む", sub: "まず手を動かして状況を可視化" },
+    b: { letter: "D", label: "スタックトレースを一行ずつ読む", sub: "手を動かす前にまず読んで推論" },
+  },
+
+  // --- 3周目 ---
+  {
+    axis: 0,
+    text: "ドキュメントやコメントを書くタイミングは？",
+    a: { letter: "A", label: "実装前に書く", sub: "インターフェースや仕様を先に文書化したい" },
+    b: { letter: "C", label: "実装後に書く", sub: "落ち着いてから、必要な分だけ書く" },
+  },
+  {
+    axis: 1,
+    text: "自分のコードをレビューに出すタイミングは？",
+    a: { letter: "S", label: "納得いくまで練ってから", sub: "自分で確信を持ってから人に見せたい" },
+    b: { letter: "T", label: "早い段階で見せる", sub: "フィードバックをもらいながら進めたい" },
+  },
+  {
+    axis: 2,
+    text: "新しい技術を採用するかどうかの基準は？",
+    a: { letter: "L", label: "実績と情報量", sub: "コミュニティが十分に育っているか" },
+    b: { letter: "B", label: "まだ誰もやっていない面白さ", sub: "未開拓であること自体が魅力" },
+  },
+  {
+    axis: 3,
+    text: "バグを直した後、次に進む基準は？",
+    a: { letter: "P", label: "直ったなら次へ", sub: "とりあえず解消したことが確認できればいい" },
+    b: { letter: "D", label: "原因を理解してから次へ", sub: "なぜ直ったのか腹落ちしないと気持ち悪い" },
+  },
+
+  // --- 4周目 ---
+  {
+    axis: 0,
+    text: "リファクタリングをする動機は？",
+    a: { letter: "A", label: "将来に備えて事前に", sub: "今のうちに整理しておけば後が楽" },
+    b: { letter: "C", label: "実際に困ってから", sub: "必要になった範囲だけ直せば十分" },
+  },
+  {
+    axis: 1,
+    text: "ペアプログラミングやモブプログラミングをどう感じる？",
+    a: { letter: "S", label: "集中を乱される", sub: "一人の方がずっと捗る" },
+    b: { letter: "T", label: "一人より進む", sub: "他人の視点が入る方が楽しい" },
+  },
+  {
+    axis: 2,
+    text: "個人開発で新しいアイデアを試すとき使う技術は？",
+    a: { letter: "L", label: "使い慣れた道具", sub: "アイデアを早く形にすることを優先したい" },
+    b: { letter: "B", label: "学びたい新しい技術", sub: "アイデアは新技術を試す口実でもある" },
+  },
+  {
+    axis: 3,
+    text: "新しいライブラリを使うとき、最初にすることは？",
+    a: { letter: "P", label: "サンプルをコピペして動かす", sub: "動かしながら体で理解したい" },
+    b: { letter: "D", label: "公式ドキュメントを通読する", sub: "全体像を把握してから手を動かしたい" },
+  },
+];
+
+const TYPES = {
+  ASLP: { name: "職人型", tag: "設計・孤高・枯れ技術・観察デバッグ", desc: "堅牢な設計を一人でじっくり組み上げる。流行りには乗らず、実績のある技術を積み重ねる。バグは出力を眺めて地道に潰す、昔ながらの職人気質。" },
+  ASLD: { name: "アーキテクト型", tag: "設計・孤高・枯れ技術・論理デバッグ", desc: "静かな環境で設計図と首っ引き。技術選定は保守的で、障害調査はスタックトレースを冷静に読み解く。チームの土台を支える存在。" },
+  ASBP: { name: "隠者ハッカー型", tag: "設計・孤高・最新技術・観察デバッグ", desc: "一人で最新技術を試しながら大胆な設計を練る。デバッグは感覚的で、動かしながら確かめるタイプ。孤高の実験者。" },
+  ASBD: { name: "鬼才エンジニア型", tag: "設計・孤高・最新技術・論理デバッグ", desc: "誰とも群れず、最先端の技術で野心的な設計を組む。バグの原因はロジックで追い詰める。静かな天才肌。" },
+  ATLP: { name: "現場監督型", tag: "設計・チーム・枯れ技術・観察デバッグ", desc: "みんなで話しながら手堅い設計を固める。実績重視で、デバッグも会話しながらprintで確認。チームの安心感を作る。" },
+  ATLD: { name: "テックリード型", tag: "設計・チーム・枯れ技術・論理デバッグ", desc: "チームで議論しながら安定志向の設計を導く。障害対応は冷静沈着、ロジックでチームを導くまとめ役。" },
+  ATBP: { name: "ムードメーカー型", tag: "設計・チーム・最新技術・観察デバッグ", desc: "新しい技術の話題でチームを盛り上げながら設計する。デバッグも賑やかに、画面を見せ合いながら進める。" },
+  ATBD: { name: "イノベーター型", tag: "設計・チーム・最新技術・論理デバッグ", desc: "チームを巻き込みながら最新技術で大胆な設計を描く。障害調査は論理的、周囲を巻き込んで推理する探偵役。" },
+  CSLP: { name: "寡黙な熟練工型", tag: "実装・孤高・枯れ技術・観察デバッグ", desc: "とにかく手を動かして形にする。安定した技術を淡々と使いこなし、バグはひたすら出力を眺めて潰す。静かな職人。" },
+  CSLD: { name: "サイレントスナイパー型", tag: "実装・孤高・枯れ技術・論理デバッグ", desc: "一人で黙々とコードを書き、枯れた技術で確実に仕上げる。バグは論理で一撃で仕留める寡黙な狙撃手。" },
+  CSBP: { name: "ガレージハッカー型", tag: "実装・孤高・最新技術・観察デバッグ", desc: "最新技術に飛びつき、とりあえず動かしてみる実験精神。デバッグも試行錯誤で、一人で黙々と改造を続ける。" },
+  CSBD: { name: "孤独な天才肌型", tag: "実装・孤高・最新技術・論理デバッグ", desc: "新しい技術でコードから書き進める行動派。バグはロジックで冷静に特定する、寡黙だが切れ味鋭いタイプ。" },
+  CTLP: { name: "頼れる先輩型", tag: "実装・チーム・枯れ技術・観察デバッグ", desc: "チームで話しながら手を動かし、安定技術で確実に前進する。デバッグも仲間と画面を見ながらワイワイ進める。" },
+  CTLD: { name: "堅実なチームプレイヤー型", tag: "実装・チーム・枯れ技術・論理デバッグ", desc: "チームで議論しつつ手堅い技術で実装を進める。バグはロジックで淡々と、しかしチームで共有しながら潰す。" },
+  CTBP: { name: "お祭り男/女型", tag: "実装・チーム・最新技術・観察デバッグ", desc: "新しい技術をチームに持ち込み、とにかく動かして盛り上がる。デバッグも賑やかに手を動かしながら進める。" },
+  CTBD: { name: "スクラムの申し子型", tag: "実装・チーム・最新技術・論理デバッグ", desc: "チームを巻き込みながら最新技術でどんどん実装する。バグはロジックでテンポよく解決する、現場の推進役。" },
+};
+
+// Catppuccin Latte (ライトテーマ)
+const COLORS = {
+  base: "#eff1f5",
+  mantle: "#e6e9ef",
+  crust: "#dce0e8",
+  surface0: "#ccd0da",
+  surface1: "#bcc0cc",
+  text: "#4c4f69",
+  subtext: "#6c6f85",
+  overlay: "#8c8fa1",
+  blue: "#1e66f5",
+  green: "#40a02b",
+  peach: "#fe640b",
+  mauve: "#8839ef",
+  red: "#d20f39",
+  yellow: "#df8e1d",
+};
+
+const AXIS_COLORS = [COLORS.blue, COLORS.green, COLORS.peach, COLORS.mauve];
+
+// ---------- UI ----------
+
+function ProgressBar({ current, total }) {
+  const filled = Math.round((current / total) * 20);
+  const bar = "█".repeat(filled) + "░".repeat(20 - filled);
+  return (
+    <div className="font-mono text-xs mb-6 select-none" style={{ color: COLORS.subtext }}>
+      <span style={{ color: COLORS.green }}>[{bar}]</span>{" "}
+      <span>{current}/{total}</span>
+    </div>
+  );
+}
+
+function TerminalChrome({ title }) {
+  return (
+    <div
+      className="flex items-center gap-2 px-4 py-3 rounded-t-lg"
+      style={{ background: COLORS.mantle, borderBottom: `1px solid ${COLORS.surface0}` }}
+    >
+      <span className="w-3 h-3 rounded-full" style={{ background: COLORS.red }} />
+      <span className="w-3 h-3 rounded-full" style={{ background: COLORS.yellow }} />
+      <span className="w-3 h-3 rounded-full" style={{ background: COLORS.green }} />
+      <span className="ml-3 text-xs font-mono truncate" style={{ color: COLORS.overlay }}>
+        {title}
+      </span>
+    </div>
+  );
+}
+
+function ProgrammerMBTI() {
+  const [step, setStep] = useState(-1); // -1: 開始画面, 0..N-1: 質問, N: 結果
+  const [scores, setScores] = useState({ 0: { a: 0, b: 0 }, 1: { a: 0, b: 0 }, 2: { a: 0, b: 0 }, 3: { a: 0, b: 0 } });
+
+  const total = QUESTIONS.length;
+
+  const answer = (choice) => {
+    const q = QUESTIONS[step];
+    setScores((prev) => ({
+      ...prev,
+      [q.axis]: { ...prev[q.axis], [choice]: prev[q.axis][choice] + 1 },
+    }));
+    setStep((s) => s + 1);
+  };
+
+  const restart = () => {
+    setStep(-1);
+    setScores({ 0: { a: 0, b: 0 }, 1: { a: 0, b: 0 }, 2: { a: 0, b: 0 }, 3: { a: 0, b: 0 } });
+  };
+
+  const computeCode = () => {
+    const letters = [
+      scores[0].a >= scores[0].b ? "A" : "C",
+      scores[1].a >= scores[1].b ? "S" : "T",
+      scores[2].a >= scores[2].b ? "L" : "B",
+      scores[3].a >= scores[3].b ? "P" : "D",
+    ];
+    return letters.join("");
+  };
+
+  const axisLabel = (axis) => {
+    const map = {
+      0: ["設計", "実装"],
+      1: ["ソロ", "チーム"],
+      2: ["枯れ技術", "最新技術"],
+      3: ["観察デバッグ", "論理デバッグ"],
+    };
+    return map[axis];
+  };
+
+  return (
+    <div
+      className="min-h-screen w-full flex items-center justify-center p-4"
+      style={{
+        background: `radial-gradient(circle at 20% 20%, #ffffff 0%, ${COLORS.base} 45%, ${COLORS.crust} 100%)`,
+        fontFamily:
+          "'JetBrains Mono','Fira Code',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
+      }}
+    >
+      <div className="w-full max-w-xl">
+        <div
+          className="rounded-lg overflow-hidden shadow-xl"
+          style={{ background: COLORS.base, border: `1px solid ${COLORS.surface0}` }}
+        >
+          <TerminalChrome title="programmer-mbti — zsh — 80x24" />
+
+          <div className="px-6 py-8">
+            {/* ---------- 開始画面 ---------- */}
+            {step === -1 && (
+              <div>
+                <p className="text-sm mb-1" style={{ color: COLORS.overlay }}>
+                  $ whoami --as-a-programmer
+                </p>
+                <h1 className="text-2xl font-bold mt-3 mb-2" style={{ color: COLORS.text }}>
+                  プログラマ版性格診断
+                </h1>
+                <p className="text-sm leading-relaxed mb-8" style={{ color: COLORS.subtext }}>
+                  16の質問に答えると、あなたの開発スタイルを4文字のタイプコードで診断します。
+                  設計 / 実装、ソロ / チーム、枯れ技術 / 最新技術、観察デバッグ / 論理デバッグ ── 4つの軸で判定。
+                </p>
+                <button
+                  onClick={() => setStep(0)}
+                  className="w-full py-3 rounded font-bold text-white transition-colors"
+                  style={{ background: COLORS.green }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "#379625")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = COLORS.green)}
+                >
+                  $ run diagnosis
+                </button>
+              </div>
+            )}
+
+            {/* ---------- 質問画面 ---------- */}
+            {step >= 0 && step < total && (
+              <div>
+                <ProgressBar current={step} total={total} />
+                <p className="text-xs mb-2" style={{ color: COLORS.overlay }}>
+                  Q{step + 1}.
+                  <span
+                    className="ml-2 px-2 py-0.5 rounded text-[10px] font-bold"
+                    style={{ background: AXIS_COLORS[QUESTIONS[step].axis] + "1a", color: AXIS_COLORS[QUESTIONS[step].axis] }}
+                  >
+                    axis: {axisLabel(QUESTIONS[step].axis)[0]} / {axisLabel(QUESTIONS[step].axis)[1]}
+                  </span>
+                </p>
+                <h2 className="text-lg font-bold mb-6 leading-relaxed" style={{ color: COLORS.text }}>
+                  {QUESTIONS[step].text}
+                </h2>
+
+                <div className="space-y-3">
+                  {["a", "b"].map((key) => {
+                    const opt = QUESTIONS[step][key];
+                    return (
+                      // key に step を含めることで質問が切り替わるたびに要素を作り直す。
+                      // こうしないと、直前の質問でマウスが触れた枠線の色（onMouseEnterで
+                      // 直接DOMに書き込んだスタイル）が使い回されたボタン要素に残ってしまい、
+                      // 選んでいないのに枠が青いまま、というバグが起きる。
+                      <button
+                        key={`${step}-${key}`}
+                        onClick={() => answer(key)}
+                        className="w-full text-left px-4 py-3 rounded transition-colors group"
+                        style={{ background: COLORS.mantle, border: `1px solid ${COLORS.surface0}` }}
+                        onMouseEnter={(e) => (e.currentTarget.style.borderColor = COLORS.blue)}
+                        onMouseLeave={(e) => (e.currentTarget.style.borderColor = COLORS.surface0)}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm" style={{ color: COLORS.blue }}>
+                            [{key.toUpperCase()}]
+                          </span>
+                          <span className="font-semibold text-sm" style={{ color: COLORS.text }}>
+                            {opt.label}
+                          </span>
+                        </div>
+                        <p className="text-xs mt-1 ml-7" style={{ color: COLORS.overlay }}>
+                          {opt.sub}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* ---------- 結果画面 ---------- */}
+            {step === total && (
+              <ResultView code={computeCode()} scores={scores} axisLabel={axisLabel} onRestart={restart} />
+            )}
+          </div>
+        </div>
+        <p className="text-center text-xs mt-4" style={{ color: COLORS.overlay }}>
+          ※ 診断結果はエンタメです。本番環境への適用は自己責任で。
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ResultView({ code, scores, axisLabel, onRestart }) {
+  const type = TYPES[code];
+
+  const axisBars = [0, 1, 2, 3].map((axis) => {
+    const { a, b } = scores[axis];
+    const totalQ = a + b;
+    const aPct = totalQ === 0 ? 50 : Math.round((a / totalQ) * 100);
+    return { axis, aPct, bPct: 100 - aPct, labels: axisLabel(axis), color: AXIS_COLORS[axis] };
+  });
+
+  return (
+    <div>
+      <p className="text-xs mb-1" style={{ color: COLORS.overlay }}>
+        $ diagnosis --result
+      </p>
+      <div className="flex items-baseline gap-3 mt-3 mb-1">
+        <span className="text-3xl font-black tracking-widest" style={{ color: COLORS.green }}>
+          {code}
+        </span>
+        <span
+          className="text-xs px-2 py-1 rounded"
+          style={{ color: COLORS.green, background: COLORS.green + "1a" }}
+        >
+          PASSED
+        </span>
+      </div>
+      <h2 className="text-xl font-bold mb-1" style={{ color: COLORS.text }}>
+        {type.name}
+      </h2>
+      <p className="text-xs mb-5" style={{ color: COLORS.peach }}>
+        {type.tag}
+      </p>
+      <p className="text-sm leading-relaxed mb-6" style={{ color: COLORS.subtext }}>
+        {type.desc}
+      </p>
+
+      <div className="space-y-3 mb-8">
+        {axisBars.map(({ axis, aPct, bPct, labels, color }) => (
+          <div key={axis}>
+            <div className="flex justify-between text-[10px] mb-1" style={{ color: COLORS.overlay }}>
+              <span>{labels[0]} {aPct}%</span>
+              <span>{labels[1]} {bPct}%</span>
+            </div>
+            <div className="h-2 rounded-full overflow-hidden flex" style={{ background: COLORS.surface0 }}>
+              <div style={{ width: `${aPct}%`, background: color }} />
+              <div style={{ width: `${bPct}%`, background: COLORS.surface1 }} />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <button
+        onClick={onRestart}
+        className="w-full py-3 rounded font-bold transition-colors"
+        style={{ color: COLORS.text, border: `1px solid ${COLORS.surface0}`, background: "transparent" }}
+        onMouseEnter={(e) => (e.currentTarget.style.borderColor = COLORS.blue)}
+        onMouseLeave={(e) => (e.currentTarget.style.borderColor = COLORS.surface0)}
+      >
+        $ rerun
+      </button>
+    </div>
+  );
+}
+
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<ProgrammerMBTI />);
+</script>
+</body>
+</html>
